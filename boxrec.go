@@ -8,6 +8,7 @@ import (
 		"strings"
 		"os"
 		"encoding/csv"
+		"time"
     // import third party libraries
     "github.com/PuerkitoBio/goquery"
 )
@@ -117,18 +118,26 @@ func crawl(url string, finished chan bool, boxers chan Boxer) {
 	} ()
   if err != nil {
     log.Println(err)
+		return
   }
   doc.Find("#ratingsResults tbody tr").Each(func(index int, item *goquery.Selection) {
   	parseTd(item, boxers)
   })
 }
 
+func crawler(urls chan string, finished chan bool, boxers chan Boxer, pause time.Duration) {
+	for url := range urls {
+		crawl(url, finished, boxers)
+		time.Sleep( pause)
+	}
+}
+
 func usage() {
-	log.Fatal("Usage: go-boxers <page start> <page count> <outfile>")
+	log.Fatal("Usage: go-boxers <page start> <page count> <outfile> <pause>")
 }
 
 func main() {
-	if len(os.Args) < 4 {
+	if len(os.Args) < 5 {
 		usage()
 	}
 	pagesToFetch, err := strconv.ParseInt(os.Args[2], 10, 0)
@@ -139,9 +148,16 @@ func main() {
 	if err != nil || startPage < 1 {
 		usage()
 	}
+	filename := os.Args[3]
+	crawlPause, err := strconv.ParseInt(os.Args[4], 10, 0)
+	if err != nil || crawlPause < 0 {
+		usage()
+	}
 	pages := int(pagesToFetch)
 	start := int(startPage)
-	f, err := os.Create("boxers.csv")
+	pause := time.Duration(crawlPause) * time.Second
+	log.Println(pause)
+	f, err := os.Create(filename)
 	defer f.Close()
 	if err != nil {
 		log.Fatal("Failed to create file")
@@ -168,9 +184,17 @@ func main() {
 	}
 	finished := make(chan bool)
 	boxers := make(chan Boxer)
-	for i:=0; i<pages; i++ {
-		 go crawl(fmt.Sprintf("http://boxrec.com/en/ratings?offset=%d", (i+start-1)*20), finished, boxers)
+	urls := make(chan string)
+	for i:=0; i<4; i++ {
+			go crawler(urls, finished, boxers, pause)
+  }
+	go func() {for i:=0; i<pages; i++ {
+		log.Println(i)
+		 urls <- fmt.Sprintf("http://boxrec.com/en/ratings?offset=%d", (i+start-1)*20)
+		 //go crawl(fmt.Sprintf("http://boxrec.com/en/ratings?offset=%d", (i+start-1)*20), finished, boxers)
 	 }
+	 close(urls)
+ } ()
 	 counter:=0
 	 pageCounter := 0
 LOOP:
